@@ -1,0 +1,428 @@
+---
+title: "Sharday Study Habit Figures"
+author: "Emily Driessen"
+date: "6/1/2022"
+output: html_document
+---
+
+This R Markdown file presents all of the codes used to make the figures for the quantitative analysis to answer the following research questions:
+
+In this quantitative analysis, we explored the following research questions:
+
+Research Questions:
+1.	Are there differences in the use of study behaviors between lower-level and upper-level students?
+2.	What is the effect of each study behaviors on student performance?
+3.	How does exam score predict the study behaviors students use?
+4.	How do student study behaviors change over the course of the semester?
+
+We break down the analysis for each research question after conducting descriptive analyses. 
+
+```{r}
+#clear environment
+rm(list=ls())
+#set working directory
+setwd("~/Box/Research Projects/Sharday's Study Habits")
+#upload data
+CombinedZ <- read.csv("~/Box/Research Projects/Sharday's Study Habits/CombinedZ.csv") #This dataset has Z-scored exam scores as normalized within each instructors' classes.
+
+##Load nlme
+library(nlme) #for lme4 use lmer for poisson distribution with random effects
+library(tidyverse) #for pipes
+library(lme4) 
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+#Clean Data
+```{r}
+CombinedZ<-CombinedZ %>%
+ mutate(instructoranon=as.character(instructoranon))%>%
+mutate(instructoranon=fct_relevel(instructoranon, "A","B","C", "D")) %>% #mutate the instructor column by releveling it to have the desired order 
+  filter(!is.na(Zexamscore), exam_score>0) %>% #removes any NA for Zexamscore, and removes any exam scores that were 0 before they were z-scored
+  select(student_id, Zexamscore, exam_score, instructoranon, exam, gender, ethnicity, Level, active_strat_count, passive_strat_count, distracted_study, GPA_hs, enroll_year, class)%>%
+rename(Student="student_id", Exam = "exam", Score = "exam_score", ZScore = "Zexamscore", Gender = "gender", Ethnicity = "ethnicity", Active = "active_strat_count", Passive = "passive_strat_count", Distracted = "distracted_study", GPA="GPA_hs", Enrolled="enroll_year", Class="class")
+```
+
+
+1.	Are there differences in the use of study behaviors between students in different courses?
+
+```{r}
+StrategyCountClass<-CombinedZ %>%
+  select(Score, Student, instructoranon, Exam, Gender, Ethnicity, Class, Active, Passive)%>%
+  pivot_longer(-c(Student, Score, Class, instructoranon, Exam, Gender, Ethnicity), "StudyHabitType") %>%
+  rename("Count"="value")  #rename the default "value" column as "Percent" 
+
+
+meanactive<-CombinedZ%>%
+  group_by(Class) %>%
+ summarise(mean(Active, na.rm = TRUE)) 
+ # mean active strategies for lower = 2.79 and for upper is 3.13
+
+meanpassive<-CombinedZ%>%
+  group_by(Class) %>%
+ summarise(mean(Passive, na.rm = TRUE)) 
+
+meanpassive
+ # mean passive strategies for A&P is 1.95, Genetics is 1.55, and microbiology is 1.89
+
+#I can use this information to create trendlines for the plot. 
+
+means <- StrategyCountClass %>%
+       group_by(Class, StudyHabitType) %>%
+       summarise(grp.mean=mean(Count)) 
+
+means[is.na(means)] <- 1.95
+       
+  StratcountClass<-ggplot(StrategyCountClass, aes(x =Count, fill = Class)) +
+    geom_bar(position = position_dodge(preserve = "single")) +
+    scale_fill_manual(values = c("#91D1C2B2", "#F39B7FB2", "#FF7256" )) +
+  scale_color_manual(values = c("#91D1C2B2", "#F39B7FB2", "#FF7256")) +
+    scale_x_continuous(name = "# of study strategies used", breaks=c(0,1,2,3,4,5,6), limits=c(-0.5, 6.5)) + 
+    scale_y_continuous(name = "# of students", breaks=c(0,25,50,75,100,125,150, 175, 200, 225, 250, 275, 300, 325, 350, 375, 400), limits=c(0, 400)) +  
+    theme_bw() + 
+   theme(
+        panel.grid = element_blank())+ 
+  facet_wrap(~StudyHabitType)+
+    geom_vline(data=means, aes(xintercept=grp.mean, color=Class), linetype="dashed")
+  
+  StratcountClass
+
+#library(tidyverse)
+
+#https://stackoverflow.com/questions/43569732/how-to-add-legend-to-geom-vline-in-facet-histograms
+ 
+#https://rsample.tidymodels.org/articles/Applications/Intervals.html
+
+  
+  #Now to Save!
+# - vector based output height = 4.5, width = 6 inches
+ggsave(StratcountClass, file=" Stratcount.png",
+       height = 4.5,
+       width = 6,
+       units = "in",
+       dpi = 300)
+
+Active<-glmer(Active~Class+(1|instructoranon/Student), data=CombinedZ, family=poisson, na.action=na.exclude) #active study strategies is a count, so I used glmer to specify poisson as family
+
+summary(Active)
+
+confint(Active)
+
+Passive<-glmer(Passive~Class+(1|instructoranon/Student), data=CombinedZ, family=poisson, na.action=na.exclude) #passive study strategies is a count, so I used glmer to specify poisson as family
+summary(Passive)
+confint(Passive)
+
+##There are significant differences between courses for both active and passive. Specifically, Genetics is not different than anatomy, but microbiology is significantly different that anatomy when it comes to the number of active strategies used. For passive strategies, Microbiology is not different from anatomy, but genetics is different from anatomy. 
+```
+
+Are there differences in the use of study behaviors between students by instructor?
+```{r}
+StrategyCountInstructor<-CombinedZ %>%
+  select(Score, Student, instructoranon, Exam, Gender, Ethnicity, Active, Passive)%>%
+  pivot_longer(-c(Student, Score, instructoranon, Exam, Gender, Ethnicity), "StudyHabitType") %>%
+  rename("Count"="value")  #rename the default "value" column as "Percent" 
+
+meanactiveinstructor<-CombinedZ%>%
+  group_by(instructoranon) %>%
+ summarise(mean(Active, na.rm = TRUE)) 
+
+meanactiveinstructor
+ # mean active strategies for instructor A is 2.71, instructor B is 2.87, instructor C is 3.24, instructor D is 2.81
+
+meanpassiveinstructor<-CombinedZ%>%
+  group_by(instructoranon) %>%
+ summarise(mean(Passive, na.rm = TRUE)) 
+
+meanpassiveinstructor
+ # mean passive strategies for instructor A is 2.13, instructor B is 1.77, instructor C is 1.89, instructor D is 1.55
+
+#I can use this information to create trendlines for the plot. 
+
+means <- StrategyCountInstructor %>%
+       group_by(instructoranon, StudyHabitType) %>%
+       summarise(grp.mean=mean(Count)) 
+
+means[is.na(means)] <- 1.95
+       
+  StratcountInstructor<-ggplot(StrategyCountClass, aes(x =Count, fill = instructoranon)) +
+    geom_bar(position = position_dodge(preserve = "single")) +
+    scale_fill_manual(values = c("#91D1C2B2","#458B74", "#FF7256", "#F39B7FB2" )) +
+  scale_color_manual(values = c("#91D1C2B2", "#458B74", "#FF7256", "#F39B7FB2")) +
+    scale_x_continuous(name = "# of study strategies used", breaks=c(0,1,2,3,4,5,6), limits=c(-0.5, 6.5)) + 
+    scale_y_continuous(name = "# of students", breaks=c(0,25,50,75,100,125,150, 175, 200, 225, 250, 275, 300, 325, 350, 375, 400), limits=c(0, 300)) +  
+    theme_bw() + 
+   theme(
+        panel.grid = element_blank())+ 
+  facet_wrap(~StudyHabitType)+
+    geom_vline(data=means, aes(xintercept=grp.mean, color=instructoranon), linetype="dashed")
+  
+  StratcountInstructor
+
+  
+  #Now to Save!
+# - vector based output height = 4.5, width = 6 inches
+ggsave(StratcountInstructor, file=" StratcountInstructor.png",
+       height = 4.5,
+       width = 6,
+       units = "in",
+       dpi = 300)
+
+Passive<-glmer(Passive~instructoranon+(1|Student), data=CombinedZ, family=poisson, na.action=na.exclude) #passive study strategies is a count, so I used glmer to specify poisson as family
+summary(Passive)
+confint(Passive)
+##Should I keep student nested in instructor for this model when I'm testing the differences between instructors? The resuls of this analysis show that instructor B, C, and D are all statistically different from instructor A when it comes to the number of passive strategies students used. 
+
+Active<-glmer(Active~instructoranon+(1|Student), data=CombinedZ, family=poisson, na.action=na.exclude) #active study strategies is a count, so I used glmer to specify poisson as family
+summary(Active)
+confint(Active)
+
+##This analysis showed there is a difference between the number of active strategies used in instructor C's class and instructor A's class. However, instructor B and D are not different from Instructor A. 
+```
+
+
+2.What is the effect of each study behavior on student performance?
+```{r}
+
+CombinedZ1<-CombinedZ %>%
+mutate(Activepercent = ((Active)/(Active + Passive)*100))%>% 
+  select(Score, Student, instructoranon, Exam, ZScore, Level, Activepercent)
+
+#Passive by class
+ExamPassiveClass<-ggplot(CombinedZ, aes(x = Passive, y = Score)) + # map data
+  geom_jitter(alpha=.3,) +
+#scale_fill_manual(values = c("blue", "darkblue")) +
+  #scale_color_manual(values = c("blue" ,"darkblue")) +
+  scale_y_continuous(name = "Exam Score", breaks=c(20,30,40,50,60,70,80,90,100), limits=c(30, 100)) +
+ scale_x_continuous(name = "Count passive study strategies", breaks=c(0,1, 2, 3, 4), limits=c(0, 4)) +   # CHANGE: change label
+  theme_bw() + 
+  theme(panel.grid = element_blank()) +
+  facet_wrap(~Class) +
+  geom_smooth(method=lm, se=FALSE, col='black', size=1)
+
+ExamPassiveClass
+
+ggsave(ExamPassiveClass, file="ExamPassiveClass.png",
+       height = 4.5,
+       width = 8,
+       units = "in",
+       dpi = 300)
+
+#Passive
+ExamPassive<-ggplot(CombinedZ, aes(x = Passive, y = Score)) + # map data
+  geom_jitter(alpha=.3,) +
+  scale_y_continuous(name = "Exam Score", breaks=c(20,30,40,50,60,70,80,90,100), limits=c(30, 100)) +
+ scale_x_continuous(name = "Count passive study strategies", breaks=c(0,1, 2, 3, 4), limits=c(0, 4)) +   # CHANGE: change label
+  theme_bw() + 
+  theme(panel.grid = element_blank()) +
+  geom_smooth(method=lm, se=FALSE, col='black', size=1)
+
+ExamPassive
+
+ggsave(ExamPassive, file="ExamPassive.png",
+       height = 4.5,
+       width = 8,
+       units = "in",
+       dpi = 300)
+
+
+#Active by class
+ExamActiveClass<-ggplot(CombinedZ, aes(x = Active, y = Score)) + # map data
+  geom_jitter(alpha=.3,) +
+  scale_y_continuous(name = "Exam Score", breaks=c(20,30,40,50,60,70,80,90,100), limits=c(30, 100)) +
+ scale_x_continuous(name = "Count active study strategies", breaks=c(0,1, 2, 3, 4, 5, 6), limits=c(0, 6)) +   # CHANGE: change label
+  theme_bw() + 
+  theme(panel.grid = element_blank()) +
+  facet_wrap(~Class) +
+  geom_smooth(method=lm, se=FALSE, col='black', size=1)
+
+ExamActiveClass
+
+ggsave(ExamActiveClass, file="ExamActiveClass.png",
+       height = 4.5,
+       width = 8,
+       units = "in",
+       dpi = 300)
+
+#Active
+ExamActive<-ggplot(CombinedZ, aes(x = Active, y = Score)) + # map data
+  geom_jitter(alpha=.3,) +
+  scale_y_continuous(name = "Exam Score", breaks=c(20,30,40,50,60,70,80,90,100), limits=c(30, 100)) +
+ scale_x_continuous(name = "Count active study strategies", breaks=c(0,1, 2, 3, 4, 5, 6), limits=c(0, 6)) +   # CHANGE: change label
+  theme_bw() + 
+  theme(panel.grid = element_blank()) +
+  geom_smooth(method=lm, se=FALSE, col='black', size=1)
+
+ExamActive
+
+ggsave(ExamActive, file="ExamActive.png",
+       height = 4.5,
+       width = 8,
+       units = "in",
+       dpi = 300)
+
+#Passive
+
+##Passive by Class
+PassivecountexamZ<-lme(ZScore~Passive + Class + Passive:Class, random=~1|instructoranon/Student, data=CombinedZ, na.action=na.exclude)
+
+summary(PassivecountexamZ)
+
+##Interaction is not significant, so I took that out and analyzed passive strategies together.
+PassivecountexamZ<-lme(ZScore~Passive + Class, random=~1|instructoranon/Student, data=CombinedZ, na.action=na.exclude)
+
+summary(PassivecountexamZ)
+
+##Active by Class
+ActivecountexamZ<-lme(ZScore~Active + Class + Active:Class, random=~1|instructoranon/Student, data=CombinedZ, na.action=na.exclude)
+
+summary(ActivecountexamZ)
+
+##No sig effect of the interaction, so analyzed active all together
+
+ActivecountexamZ<-lme(ZScore~Active + Class, random=~1|instructoranon/Student, data=CombinedZ, na.action=na.exclude)
+
+summary(ActivecountexamZ)
+
+
+##There is a significant effect of active strategies on student performance. To make it more interperatable, I'm going to run these models with exam score in percent rather than z-scored. 
+
+Passivecountexam<-lme(Score~Passive + Class, random=~1|instructoranon/Student, data=CombinedZ, na.action=na.exclude)
+
+summary(Passivecountexam)
+intervals(Passivecountexam)
+
+Activecountexam<-lme(Score~Active + Class, random=~1|instructoranon/Student, data=CombinedZ, na.action=na.exclude)
+
+summary(Activecountexam)
+intervals(Activecountexam)
+
+```
+
+3. How do student study behaviors change over the course of the semester?
+
+###Active by exam
+```{r}
+CountActiveExamnolevel<-CombinedZ %>%
+  group_by(Exam) %>%
+count(Active)%>% #This tells me the number of students who said each number of strategies for active by level. 
+  rename("number_of_students"="n") %>% #rename the default "value" column as "Percent" 
+  mutate(Total_of_students = number_of_students) %>%#I created a dummy column for total number of students. Then, I manually added up all of the lower students and all of the upper students. There are 968 exam 1 students and 900 exam 3 students. 
+      mutate(Total_of_students=recode(Total_of_students,"45"="968","112"="968","192"="968", "237"="968", "217"="968", "111"="968","54"="968", "42"="900", "106"="900","197"="900","204"="900", "187"="900", "76"="900", "34"="900")) %>%
+  mutate(Percent_of_students_Active = number_of_students) %>%#Create dummy column and fill in values
+  mutate(Percent_of_students_Active=recode(Percent_of_students_Active,"45"="4.65","112"="11.57","192"="19.83", "237"="24.48", "217"="22.42", "111"="11.47","54"="5.58", "42"="4.67", "106"="11.78","197"="21.89","204"="22.67", "187"="20.78", "76"="8.44", "34"="3.78")) %>%
+   mutate(Percent_of_students_Active=as.numeric(Percent_of_students_Active))%>%
+ mutate(Total_of_students=as.numeric(Total_of_students))
+
+meanactivenolevel<-CombinedZ%>%
+  group_by(Exam) %>%
+ summarise(mean(Active, na.rm = TRUE)) %>%
+  rename(grp.mean="mean(Active, na.rm = TRUE)")
+
+ActivePercentExamnolevel<-ggplot(CountActiveExamnolevel, aes(x=Active, y=Percent_of_students_Active, fill=Exam)) +
+    geom_col(position = position_dodge(preserve = "single")) +
+        scale_fill_manual(values=c("#8491B4B2", "#7E6148B2")) +
+   scale_color_manual(values = c("#8491B4B2", "#7E6148B2")) +
+    scale_x_continuous(name = "# of study strategies used", breaks=c(0,1,2,3,4,5,6), limits=c(-0.5, 6.5)) + 
+    scale_y_continuous(name = "% of students", breaks=c(0, 10, 20, 30, 40), limits=c(0, 45)) +  
+    theme_bw() + 
+   theme(
+        panel.grid = element_blank())+
+  geom_vline(data=meanactivenolevel, aes(xintercept=grp.mean, color=Exam), linetype="dashed")
+
+  
+  ActivePercentExamnolevel
+  #Now to Save!
+# - vector based output height = 4.5, width = 6 inches
+ggsave(ActivePercentExamnolevel, file=" ActivePercentExamnolevel.png",
+       height = 4.5,
+       width = 6,
+       units = "in",
+       dpi = 300)
+```
+
+Passive by exam
+```{r}
+CountPassiveExamnolevel<-CombinedZ %>%
+  group_by(Exam) %>%
+count(Passive)%>% #This tells me the number of students who said each number of strategies for active by level. 
+  rename("number_of_students"="n") %>% #rename the default "value" column as "Percent" 
+  mutate(Total_of_students = number_of_students) %>% #I created a dummy column for total number of students. Then, I manually added up all of the lower students and all of the upper students. There are 968 exam 1 students and 845 exam 3 students. 
+     mutate(Total_of_students=recode(Total_of_students,"47"="968","330"="968","375"="968", "181"="968", "35"="968", "22"="845","251"="845", "369"="845", "171"="845","32"="845")) %>%
+ filter(!is.na(Passive)) %>% #removes any NA for Zexamscore, and removes any exam scores that were 0 before they were z-scored
+  mutate(Percent_of_students_Passive = number_of_students) %>%#Create dummy column and fill in values
+  mutate(Percent_of_students_Passive=recode(Percent_of_students_Passive, "47"="4.86","330"="34.09","375"="38.74", "181"="18.70", "35"="3.62", "22"="2.60","251"="29.70", "369"="43.67", "171"="20.24","32"="3.79"))%>%
+   mutate(Percent_of_students_Passive=as.numeric(Percent_of_students_Passive))%>%
+ mutate(Total_of_students=as.numeric(Total_of_students))
+
+meanpassivenolevel<-CombinedZ%>%
+  group_by(Exam) %>%
+ summarise(mean(Passive, na.rm = TRUE)) %>%
+  rename(grp.mean="mean(Passive, na.rm = TRUE)")
+
+PassivePercentExamnolevel<-ggplot(CountPassiveExamnolevel, aes(x=Passive, y=Percent_of_students_Passive, fill=Exam)) +
+    geom_col(position = position_dodge(preserve = "single")) +
+        scale_fill_manual(values=c("#8491B4B2", "#7E6148B2")) +
+   scale_color_manual(values = c("#8491B4B2", "#7E6148B2")) +
+    scale_x_continuous(name = "# of study strategies used", breaks=c(0,1,2,3,4,5,6), limits=c(-0.5, 6.5)) + 
+    scale_y_continuous(name = "% of students", breaks=c(0, 10, 20, 30, 40), limits=c(0, 45)) +  
+    theme_bw() + 
+   theme(
+        panel.grid = element_blank())+
+  geom_vline(data=meanpassivenolevel, aes(xintercept=grp.mean, color=Exam), linetype="dashed")
+
+  
+  PassivePercentExamnolevel
+  #Now to Save!
+# - vector based output height = 4.5, width = 6 inches
+ggsave(PassivePercentExamnolevel, file="PassivePercentExamnolevel.png",
+       height = 4.5,
+       width = 6,
+       units = "in",
+       dpi = 300)
+```
+
+test for significant differences between study habits over time (exam number)
+
+```{r}
+#active strats over time count
+Activetime<-glmer(Active~Exam + Level + Exam:Level + (1|instructoranon/Student), family=poisson, data=CombinedZ, na.action=na.exclude) 
+
+summary(Activetime)
+
+#No significant interaction, so we can analyze levels together
+
+Activetimenolevel<-glmer(Active~Exam +(1|instructoranon/Student), family=poisson, data=CombinedZ, na.action=na.exclude) 
+
+summary(Activetimenolevel)
+
+
+#active strats over time count by class
+Activetime<-glmer(Active~Exam + Class + Exam:Class + (1|instructoranon/Student), family=poisson, data=CombinedZ, na.action=na.exclude) 
+
+summary(Activetime)
+
+##No significant interaction of class, so removed that. 
+Activetime<-glmer(Active~Exam + Class + (1|instructoranon/Student), family=poisson, data=CombinedZ, na.action=na.exclude) 
+
+summary(Activetime)
+confint(Activetime)
+
+##Passive by class and time
+
+Passivetime<-glmer(Passive~Exam + Class + Exam:Class + (1|instructoranon/Student), family=poisson, data=CombinedZ, na.action=na.exclude) 
+
+summary(Passivetime)
+
+##No significant interaction of class, so removed that. 
+Passivetime<-glmer(Passive~Exam + Class + (1|instructoranon/Student), family=poisson, data=CombinedZ, na.action=na.exclude) 
+
+summary(Passivetime)
+
+confint(Passivetime)
+
+
+
+
+```
+
